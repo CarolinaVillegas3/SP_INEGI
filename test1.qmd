@@ -1,27 +1,206 @@
 ---
 title: "test1"
 author: "Caro"
-format: html
+format:
+  html:
+    toc: true
+    number-sections: true
 editor: visual
+execute:
+  echo: true
+  warning: false
+  message: false
+freeze: auto
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+## Creación de un DF limpio
 
 ```{r}
-1 + 1
-```
+#Paquetes y carpetas 
+pkgs <- c("tidyverse","here","janitor","dagitty","ggdag")
+to_install <- setdiff(pkgs, rownames(installed.packages()))
+if (length(to_install) > 0) install.packages(to_install, dependencies = TRUE)
 
-You can add options to executable code like this
+library(tidyverse)
+library(here)
+library(janitor)
+library(dagitty)
+library(ggdag)
+
+# Ayuda: crear carpetas si no existen
+dir.create(here("data","clean"), recursive = TRUE, showWarnings = FALSE)
+dir.create(here("results"), recursive = TRUE, showWarnings = FALSE)
+dir.create(here("figs"), recursive = TRUE, showWarnings = FALSE)
+
+
+set.seed(123)
+dir.create(here("results"), showWarnings = FALSE)
+dir.create(here("figs"),     showWarnings = FALSE)
+
+```
 
 ```{r}
-#| echo: false
-2 * 2
+library(readr)
+library(here)
+
+df <- read_csv(
+  here("data", "raw", "Base_Cruda_INEGI.csv"),
+  locale = locale(encoding = "LATIN1"),
+  show_col_types = FALSE
+)
+head(df)
+
+
+
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+```{r}
+# --- Desduplicar SOLO por id_via entre no-missing, preservando orden ---
+df <- df %>%
+  dplyr::mutate(.rowid = dplyr::row_number())
+
+nonmiss <- df %>%
+  dplyr::filter(!is.na(id_via), id_via != "") %>%
+  dplyr::distinct(id_via, .keep_all = TRUE)
+
+miss <- df %>%
+  dplyr::filter(is.na(id_via) | id_via == "")
+
+df <- dplyr::bind_rows(nonmiss, miss) %>%
+  dplyr::arrange(.rowid) %>%
+  dplyr::select(-.rowid)
+
+# --- Verificación final de unicidad sobre no-missing ---
+nm <- sum(df$id_via != "" & !is.na(df$id_via))
+uq <- dplyr::n_distinct(df$id_via[df$id_via != "" & !is.na(df$id_via)])
+
+if (nm != uq) {
+  stop(sprintf("Persisten %d duplicados de id_via entre no-missing.", nm - uq))
+} else {
+  message("OK: id_via sin duplicados entre no-missing; se conservó el orden de filas.")
+}
+
+```
+
+```{r}
+# 1) Validar columnas mínimas y tipar a entero
+req_cols <- c("ent","mun","sexo","edad","estrato","tloc","dia","proposito_viaje","autos")
+faltan <- setdiff(req_cols, names(df))
+if (length(faltan)) stop(paste("Faltan columnas esenciales:", paste(faltan, collapse=", ")))
+
+df <- df %>%
+  dplyr::mutate(
+    ent     = as.integer(ent),
+    mun     = as.integer(mun),
+    sexo    = as.integer(sexo),     # 1=H, 2=M
+    edad    = as.integer(edad),
+    estrato = as.integer(estrato),  # 1..4
+    tloc    = as.integer(tloc),     # 1..4
+    dia     = as.integer(dia),      # 1=entre semana, 2=sábado
+    motivo  = as.integer(proposito_viaje),   # 2=Trabajo
+    autos   = as.integer(autos)
+  )
+```
+
+```{r}
+# 2) Transporte: convertir TODAS las uso_* de 1/2 -> 1/0
+uso_cols <- grep("^uso_", names(df), value = TRUE)
+if (length(uso_cols)) {
+  df[uso_cols] <- lapply(
+    df[uso_cols],
+    function(x) ifelse(x == 1L, 1L, ifelse(x == 2L, 0L, NA_integer_))
+  )
+}
+
+# Set de transporte público (incluye p5_14_06 = uso_rtp_m1)
+public_set <- intersect(
+  c("uso_micro","uso_metro","uso_rtp_m1","uso_autobus","uso_trolebus",
+    "uso_metrobus_mexibus","uso_tren_ligero","uso_tren_suburbano","uso_mexicable"),
+  names(df)
+)
+
+df <- df %>%
+  dplyr::mutate(
+    any_public = if (length(public_set)==0) NA_integer_
+                 else as.integer(rowSums(dplyr::across(dplyr::all_of(public_set), ~ .x %in% 1L),
+                                         na.rm = TRUE) > 0),
+    na_public  = if (length(public_set)==0) NA_integer_
+                 else rowSums(dplyr::across(dplyr::all_of(public_set), is.na)),
+    # 1 = público; 2 = privado; NA si todas las públicas son NA
+    MODO = dplyr::case_when(
+      length(public_set)==0 ~ NA_character_,
+      na_public == length(public_set) ~ NA_character_,
+      any_public == 1L ~ "1",
+      any_public == 0L ~ "2",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  dplyr::select(-any_public, -na_public)
+```
+
+```{r}
+# 3) DISCRETIZACIÓN para queries (binarias 0/1)
+df <- df %>%
+  dplyr::mutate(
+    # Sexo
+    MUJER = ifelse(sexo==2L, "1","0"),
+
+    # Edad (tres subgrupos)
+    EDAD_20_45 = ifelse(!is.na(edad) & edad>=20 & edad<=45, "1","0"),
+    EDAD_GE60  = ifelse(!is.na(edad) & edad>=60, "1","0"),
+    EDAD_GT30  = ifelse(!is.na(edad) & edad>30,  "1","0"),
+
+    # Estrato
+    ESTRATO_ALTO = ifelse(estrato==4L, "1","0"),
+    ESTRATO_MA   = ifelse(estrato %in% c(3L,4L), "1","0"),
+
+    # Tamaño de localidad
+    LOC_LT15K  = ifelse(tloc %in% c(3L,4L), "1","0"),
+    LOC_GT100K = ifelse(tloc==1L, "1","0"),
+
+    # Autos
+    AUTOS_2PLUS = ifelse(!is.na(autos) & autos>=2L, "1","0"),
+    AUTOS_GT1   = ifelse(!is.na(autos) & autos> 1L, "1","0"),
+
+    # Ubicación para Q4
+    ENT13 = ifelse(ent==13L, "1","0"),
+    MUN96 = ifelse(mun==96L, "1","0"),
+
+    # Día y motivo
+    SEMANA  = ifelse(dia==1L, "1","0"),
+    TRABAJO = ifelse(proposito_viaje==2L, "1","0")
+  )
+
+
+```
+
+```{r}
+# 4) Convertir flags y MODO a factores (para bnlearn)
+flag_cols <- c("MODO","MUJER","EDAD_20_45","EDAD_GE60","EDAD_GT30",
+               "ESTRATO_ALTO","ESTRATO_MA","LOC_LT15K","LOC_GT100K",
+               "AUTOS_2PLUS","AUTOS_GT1","ENT14","MUN97","SEMANA","TRABAJO")
+df[flag_cols] <- lapply(df[flag_cols], factor)
+
+# (Opcional) conservar códigos oficiales como factores también
+df <- df %>%
+  dplyr::mutate(
+    estrato = factor(estrato, levels = 1:4, labels = c("1","2","3","4")),
+    tloc    = factor(tloc,    levels = 1:4, labels = c("1","2","3","4")),
+    dia     = factor(dia,     levels = 1:2, labels = c("1","2")),
+    motivo  = factor(motivo),
+    sexo    = factor(sexo,    levels = 1:2, labels = c("1","2")),
+    ent     = factor(ent),
+    mun     = factor(mun)
+  )
+```
+
+```{r}
+# 5) Guardar limpio y resumen rápido
+readr::write_csv(df, here::here("data","clean","Base_Discretizada.csv"))
+
+list(
+  filas = nrow(df),
+  prop_publico = mean(df$MODO=="1", na.rm = TRUE),
+  na_en_flags = sapply(df[flag_cols], function(x) sum(is.na(x)))
+)
+```
