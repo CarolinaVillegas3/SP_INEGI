@@ -1,0 +1,322 @@
+---
+title: "Dag"
+format: html
+editor: visual
+---
+
+## **Situación problema: Transporte en México**
+
+```{r}
+library (bnlearn)
+```
+
+```{r}
+data <- read.csv("~/SP_INEGI/data/clean/Base_Discretizada.csv",
+                 stringsAsFactors = TRUE)
+
+head(data)
+```
+
+```{r}
+names(data)
+```
+
+```{r}
+data$TPUBLICO <- with(data, 
+  (uso_micro | uso_taxi_calle | uso_metro | uso_rtp_m1 | uso_autobus |
+   uso_trolebus | uso_metrobus_mexibus | uso_tren_ligero |
+   uso_tren_suburbano | uso_mexicable) * 1
+)
+
+data[] <- lapply(data, as.factor)
+
+
+head(data)
+```
+
+```{r}
+data_dag <- data[, c("MUJER","EDAD_20_45","EDAD_GE60","EDAD_GT30",
+           "ESTRATO_ALTO","ESTRATO_MA","LOC_LT15K","LOC_GT100K",
+           "ENT13","mun","TRABAJO","SEMANA",
+           "AUTOS_GT1","AUTOS_2PLUS","TPUBLICO")]
+
+```
+
+```{r}
+dag1 = empty.graph(nodes = c("MUJER","EDAD_20_45","EDAD_GE60","EDAD_GT30",
+           "ESTRATO_ALTO","ESTRATO_MA","LOC_LT15K","LOC_GT100K",
+           "ENT13","mun","TRABAJO","SEMANA",
+           "AUTOS_GT1","AUTOS_2PLUS","TPUBLICO") )
+```
+
+```{r}
+dag2 = empty.graph(nodes = c("MUJER","EDAD_20_45","EDAD_GE60","EDAD_GT30",
+           "ESTRATO_ALTO","ESTRATO_MA","LOC_LT15K","LOC_GT100K",
+           "ENT13","mun","TRABAJO","SEMANA",
+           "AUTOS_GT1","AUTOS_2PLUS","TPUBLICO"))
+```
+
+```{r}
+dag3 = empty.graph(nodes = c("MUJER","EDAD_20_45","EDAD_GE60","EDAD_GT30",
+           "ESTRATO_ALTO","ESTRATO_MA","LOC_LT15K","LOC_GT100K",
+           "ENT13","mun","TRABAJO","SEMANA",
+           "AUTOS_GT1","AUTOS_2PLUS","TPUBLICO"))
+```
+
+```{r}
+arc_set_1 <- matrix(c(
+  "MUJER", "TRABAJO",
+  "MUJER", "TPUBLICO",
+  "EDAD_20_45", "TRABAJO",
+  "EDAD_20_45", "TPUBLICO",
+  "EDAD_GE60", "TPUBLICO",
+  "EDAD_GE60", "AUTOS_GT1",
+  "EDAD_GE60", "AUTOS_2PLUS",
+  "EDAD_GT30", "AUTOS_GT1",
+  "ESTRATO_ALTO", "AUTOS_GT1",
+  "ESTRATO_ALTO", "AUTOS_2PLUS",
+  "ESTRATO_ALTO", "TPUBLICO",
+  "ESTRATO_MA", "AUTOS_GT1",
+  "ESTRATO_MA", "AUTOS_2PLUS",
+  "LOC_LT15K", "TPUBLICO",
+  "LOC_GT100K", "TPUBLICO",
+  "ENT13", "TPUBLICO",
+  "mun", "TPUBLICO",
+  "TRABAJO", "TPUBLICO",
+  "SEMANA", "TPUBLICO",
+  "AUTOS_GT1", "TPUBLICO",
+  "AUTOS_2PLUS", "TPUBLICO"
+), byrow = TRUE, ncol = 2, dimnames = list(NULL, c("from","to")))
+
+```
+
+```{r}
+print(arc_set_1)
+```
+
+```{r}
+arc_set_2 <- matrix(c(
+  "ENT13", "mun",
+  "ENT13", "LOC_LT15K",
+  "ENT13", "LOC_GT100K",
+  "ENT13", "TPUBLICO",
+  "mun", "TPUBLICO",
+  "LOC_LT15K", "TPUBLICO",
+  "LOC_LT15K", "AUTOS_GT1",
+  "LOC_GT100K", "TPUBLICO",
+  "LOC_GT100K", "AUTOS_GT1",
+  "ESTRATO_ALTO", "AUTOS_GT1",
+  "ESTRATO_ALTO", "AUTOS_2PLUS",
+  "ESTRATO_MA", "AUTOS_GT1",
+  "ESTRATO_MA", "AUTOS_2PLUS",
+  "MUJER", "TRABAJO",
+  "EDAD_20_45", "TRABAJO",
+  "EDAD_GE60", "TPUBLICO",
+  "EDAD_GT30", "AUTOS_GT1",
+  "TRABAJO", "TPUBLICO",
+  "SEMANA", "TPUBLICO",
+  "AUTOS_GT1", "TPUBLICO",
+  "AUTOS_2PLUS", "TPUBLICO"
+), byrow = TRUE, ncol = 2, dimnames = list(NULL, c("from","to")))
+
+```
+
+```{r}
+print(arc_set_2)
+```
+
+```{r}
+arc_set_3 <- matrix(c(
+  "ESTRATO_ALTO", "AUTOS_GT1",
+  "ESTRATO_ALTO", "AUTOS_2PLUS",
+  "ESTRATO_MA", "AUTOS_GT1",
+  "ESTRATO_MA", "AUTOS_2PLUS",
+  "LOC_LT15K", "AUTOS_GT1",
+  "LOC_LT15K", "TPUBLICO",
+  "LOC_GT100K", "AUTOS_GT1",
+  "LOC_GT100K", "TPUBLICO",
+  "EDAD_GT30", "AUTOS_GT1",
+  "EDAD_GE60", "AUTOS_GT1",
+  "EDAD_GE60", "TPUBLICO",
+  "MUJER", "TRABAJO",
+  "TRABAJO", "TPUBLICO",
+  "SEMANA", "TPUBLICO",
+  "AUTOS_GT1", "TPUBLICO",
+  "AUTOS_2PLUS", "TPUBLICO",
+  "ENT13", "TPUBLICO",
+  "mun", "TPUBLICO",
+  "EDAD_20_45", "TRABAJO",
+  "EDAD_20_45", "TPUBLICO",
+  "MUJER", "TPUBLICO"
+), byrow = TRUE, ncol = 2, dimnames = list(NULL, c("from","to")))
+
+```
+
+```{r}
+print(arc_set_3)
+```
+
+```{r}
+arcs(dag1) = arc_set_1
+dag1
+```
+
+```{r}
+arcs(dag2) = arc_set_2
+dag2
+```
+
+```{r}
+arcs(dag3) = arc_set_3
+dag3
+```
+
+> Construir Red Bayesiana Utilizando la Dag
+
+```{r}
+bn_mle_1 = bn.fit(dag1, data = data_dag, method = "mle")
+```
+
+```{r}
+bn_mle_2 = bn.fit(dag2, data = data_dag, method = "mle")
+
+```
+
+```{r}
+bn_mle_3 = bn.fit(dag3, data = data_dag, method = "mle")
+
+```
+
+> Dependencia Entre las Variables
+
+```{r}
+arc.strength(dag1, data = data_dag, criterion = "mi")
+```
+
+```{r}
+arc.strength(dag2, data = data_dag, criterion = "mi")
+```
+
+```{r}
+arc.strength(dag3, data = data_dag, criterion = "mi")
+```
+
+> Calcular BIC para ver el ajuste a los datos
+
+```{r}
+score(dag1, data = data_dag, type = "bic")
+```
+
+```{r}
+score(dag2, data = data_dag, type = "bic")
+```
+
+```{r}
+score(dag3, data = data_dag, type = "bic")
+```
+
+> La mejor Dag Resulto ser la Dag2
+
+> Graficación de las Dag
+
+```{r}
+library(BiocManager)
+library(Rgraphviz)
+```
+
+> Dag1
+
+```{r}
+graphviz.plot(dag1, shape = "ellipse")
+```
+
+> Dag 2
+
+```{r}
+graphviz.plot(dag2, shape = "ellipse")
+```
+
+> Dag 3
+
+```{r}
+graphviz.plot(dag3, shape = "ellipse")
+```
+
+> Hill Climbing
+
+```{r}
+best_dag = hc(data_dag)
+```
+
+```{r}
+modelstring(best_dag)
+```
+
+```{r}
+score(best_dag, data = data_dag, type = "bic")
+```
+
+> Estructura de la mejor Dag
+
+```{r}
+graphviz.plot(best_dag, shape = "ellipse")
+```
+
+```{r}
+arc.strength(best_dag, data = data_dag, criterion = "mi")
+```
+
+```{r}
+bn = bn.fit(best_dag, data = data_dag)
+```
+
+> ### **Query 1**
+>
+> > |  |
+> > |----|
+> > | ¿Qué tan probable es que una persona viaje entre semana a su trabajo utilizando el transporte público dado que se trata de  mujer entre 20 a 45 años en el estrato sociodemográfico alto? |
+
+```{r}
+cpquery(bn, 
+        event = (TPUBLICO == "1"), 
+        evidence = ((MUJER == "1") & (EDAD_20_45 == "1") & (ESTRATO_ALTO == "1") & (SEMANA == "1") & (TRABAJO == "1")), 
+        n = 10^6)
+```
+
+### **Query 2**
+
+> ¿Cuál es la probabilidad de usar un medio de transporte público al transportarse dado que el tamaño de la localidad es menor a 15,000 habitantes y la edad es mayor o igual a 60 años?
+
+```{r}
+cpquery(bn, 
+        event = (TPUBLICO == "1"), 
+        evidence = ((LOC_LT15K == "1") & (EDAD_GE60 == "1")), 
+        n = 10^6)
+
+```
+
+### **Query 3**
+
+> ¿Cuál es la probabilidad de que una persona de estrato medio/alto que vive en una localidad de más de 100,000 habitantes tenga 2 autos o camionetas?
+
+```{r}
+cpquery(bn, 
+        event = (AUTOS_2PLUS == "1"), 
+        evidence = ((ESTRATO_ALTO == "1" | ESTRATO_MA == "1") & (LOC_GT100K == "1")), 
+        n = 10^6)
+
+```
+
+### **Query 4**
+
+> ¿Qué tan probable es que alguien del municipio 97 de la entidad 14 tenga más de un carro y sea una mujer dado que tenga más de 30 años y viaje entre semana a su trabajo?
+
+Debido a que no hay ninguna persona que sea del municipio 97 ni la entidad 14 en nuestra base de datos final se cambiaron por el municipio 69 y entidad 13.
+
+```{r}
+cpquery(bn, 
+        event = ((AUTOS_GT1 == "1") & (MUJER == "1")), 
+        evidence = ((EDAD_GT30 == "1") & (TRABAJO == "1") & (SEMANA == "1") & (mun == "69") & (ENT13 == "1")), 
+        n = 10^6)
+
+```
