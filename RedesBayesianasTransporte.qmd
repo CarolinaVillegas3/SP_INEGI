@@ -1,0 +1,203 @@
+---
+title: "Redes Bayesianas Transporte Mexico"
+format: html
+editor: visual
+---
+
+```{r}
+# --- Paquetes ---
+library(dplyr)
+library(bnlearn)
+library(Rgraphviz)
+library(DiagrammeR)
+
+# --- 1) Cargar base discretizada 
+base <- read.csv("~/Desktop/Base_Discretizada.csv", check.names = FALSE)
+dat <- base %>%
+  transmute(
+    S = factor(ifelse(MUJER == 1, "F", "M"), levels = c("F","M")),
+    A = factor(dplyr::case_when(
+      EDAD_GE60 == 1 ~ "old",
+      EDAD_20_45 == 1 ~ "adult",
+      TRUE ~ "young"
+    ), levels = c("young","adult","old")),
+
+    # estrato (usa ESTRATO_ALTO y ESTRATO_MA)
+    Estr = factor(dplyr::case_when(
+      ESTRATO_ALTO == 1 ~ "alto",
+      ESTRATO_MA   == 1 ~ "medio",
+      TRUE ~ "bajo"
+    ), levels = c("bajo","medio","alto")),
+
+    # tamaño de localidad (usa LOC_LT15K y LOC_GT100K)
+    R = factor(dplyr::case_when(
+      LOC_LT15K  == 1 ~ "<15k",
+      LOC_GT100K == 1 ~ ">=100k",
+      TRUE ~ "15k-100k"
+    ), levels = c("<15k","15k-100k",">=100k")),
+
+    # flags de semana y trabajo
+    W = factor(ifelse(SEMANA  == 1, "yes", "no"), levels = c("no","yes")),
+    J = factor(ifelse(TRABAJO == 1, "yes", "no"), levels = c("no","yes")),
+
+    # modo principal
+    T = {
+      m <- tolower(as.character(MODO))
+      factor(ifelse(m %in% c("public","público","publico","1","si","sí","yes"),
+                    "public","private"),
+             levels = c("private","public"))
+    },
+
+    # autos en hogar
+    Autos2   = factor(ifelse(AUTOS_2PLUS == 1, "yes", "no"), levels = c("no","yes")),
+    AutosGT1 = factor(ifelse(AUTOS_GT1   == 1, "yes", "no"), levels = c("no","yes")),
+
+    # entidad y municipio
+    Ent = factor(as.character(ent)),
+    Mun = factor(as.character(mun))
+  ) %>%
+  na.omit() %>%
+  droplevels()
+
+
+
+# --- 3) Tres DAGs candidatos 
+nodes <- c("A","S","Estr","R","W","J","T","Autos2","AutosGT1","Ent","Mun")
+
+build_dag <- function(nodes, arcs_vec){
+  g <- empty.graph(nodes)
+  arcs(g) <- matrix(arcs_vec, byrow = TRUE, ncol = 2,
+                    dimnames = list(NULL, c("from","to")))
+  g
+}
+
+# DAG 1
+dag1 <- build_dag(nodes, c(
+  "Ent","R","Mun","R",
+  "A","Estr","S","Estr",
+  "A","J","A","W","S","J",
+  "R","T","Estr","T","J","T","W","T",
+  "Estr","Autos2","R","Autos2",
+  "Estr","AutosGT1","R","AutosGT1"
+))
+
+# DAG 2 
+dag2 <- build_dag(nodes, c(
+  "Ent","R","Mun","R",
+  "A","Estr","S","Estr",
+  "A","J","A","W","S","J",
+  "R","T","Estr","T","J","T","W","T","A","T","S","T",
+  "Estr","Autos2","R","Autos2",
+  "Estr","AutosGT1","R","AutosGT1"
+))
+
+# DAG 3 
+dag3 <- build_dag(nodes, c(
+  "Ent","R","Mun","R",
+  "A","Estr","S","Estr",
+  "A","J","A","W","S","J",
+  "R","T","J","T","W","T",
+  "Estr","Autos2","R","Autos2",
+  "Estr","AutosGT1","R","AutosGT1"
+))
+
+# Puntajes de los bosquejos (BIC)
+bic1 <- score(dag1, data = dat, type = "bic")
+bic2 <- score(dag2, data = dat, type = "bic")
+bic3 <- score(dag3, data = dat, type = "bic")
+print(c(bic_dag1 = bic1, bic_dag2 = bic2, bic_dag3 = bic3))
+
+# --- 4) Estructura con HC y ajuste MLE 
+set.seed(123)
+best_dag <- hc(dat, score = "bic")
+fit      <- bn.fit(best_dag, data = dat, method = "mle")
+
+print(modelstring(best_dag))
+print(c(bic_hc = score(best_dag, data = dat, type = "bic")))
+
+# --- 5) Queries con cpquery 
+set.seed(123)
+
+# Q1: P(W=yes & J=yes & T=public | S=F, A=adult, Estr=alto)
+Q1 <- cpquery(
+  fit,
+  event    = (W=="yes" & J=="yes" & T=="public"),
+  evidence = (S=="F" & A=="adult" & Estr=="alto"),
+  n = 1e6
+) 
+
+# Q2: P(T=public | R="<15k", A="old")
+Q2 <- cpquery(
+  fit,
+  event    = (T=="public"),
+  evidence = (R=="<15k" & A=="old"),
+  n = 1e6
+) 
+
+# Q3: P(Autos2="yes" | Estr ∈ {medio,alto}, R=">=100k")
+Q3 <- cpquery(
+  fit,
+  event    = (Autos2=="yes"),
+  evidence = (Estr %in% c("medio","alto") & R==">=100k"),
+  n = 1e6
+)
+
+# Q4: P(S="F" & AutosGT1="yes" | Ent=14, Mun=97, A∈{adult,old}, W=yes, J=yes)
+Q4 <- cpquery(
+  fit,
+  event    = (S=="F" & AutosGT1=="yes"),
+  evidence = (Ent=="14" & Mun=="97" &
+              A %in% c("adult","old") &
+              W=="yes" & J=="yes"),
+  n = 1e6
+)
+
+
+label_map <- c(
+  A="Edad (A)", S="Sexo (S)", Estr="Estrato (Estr)", R="Localidad (R)",
+  W="Semana (W)", J="Trabajo (J)", T="Transporte (T)",
+  Autos2="Autos 2+ (Autos2)", AutosGT1="Autos>1 (AutosGT1)",
+  Ent="Entidad (Ent)", Mun="Municipio (Mun)"
+)
+
+draw_dag <- function(dag, title, labels = label_map) {
+
+  a <- bnlearn::arcs(dag)
+
+  top_row    <- c("Ent","Mun","S","A")
+  middle_row <- c("R","Estr","W","J")
+  bottom_row <- c("Autos2","AutosGT1","T")
+
+  nodes_all <- unique(c(a[,1], a[,2]))
+  node_defs <- paste(sprintf('"%s" [label="%s"];',
+                             nodes_all, labels[nodes_all]), collapse = "\n    ")
+
+  edge_defs <- paste(sprintf('"%s" -> "%s";', a[,1], a[,2]), collapse = "\n    ")
+  rank_top    <- paste(sprintf('"%s"', top_row),    collapse = " ")
+  rank_middle <- paste(sprintf('"%s"', middle_row), collapse = " ")
+  rank_bottom <- paste(sprintf('"%s"', bottom_row), collapse = " ")
+
+  dot <- sprintf('digraph dag {
+    graph [rankdir=TB, labelloc="t", label="%s", fontsize=20, fontname="Helvetica"];
+    node  [shape=ellipse, style="rounded", fontname="Helvetica", fontsize=12];
+    edge  [arrowsize=0.8];
+    %s
+    {rank=same; %s;}
+    {rank=same; %s;}
+    {rank=same; %s;}
+    %s
+  }', title, node_defs, rank_top, rank_middle, rank_bottom, edge_defs)
+
+  DiagrammeR::grViz(dot)
+}
+
+draw_dag(dag1, "DAG 1")
+draw_dag(dag2, "DAG 2")
+draw_dag(dag3, "DAG 3")
+
+
+print(paste("Q1:", round(Q1, 4)))
+print(paste("Q2:", round(Q2, 4)))
+print(paste("Q3:", round(Q3, 4)))
+print(paste("Q4:", round(Q4, 4)))
+```
