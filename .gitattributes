@@ -1,0 +1,6 @@
+*.csv -diff
+*.tsv -diff
+*.xlsx binary
+*.zip  binary
+*.gz   binary
+*.rds  binary
